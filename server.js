@@ -2,26 +2,28 @@
 //
 // Render-hosted proxy relay
 // user <-> this server <-> manager (WebSocket) <-> target
-//
-// Manager must connect to ws(s)://your-render-app.onrender.com/ws?token=YOUR_TOKEN
 
-import http from "http";
-import net from "net";
-import WebSocket, { WebSocketServer } from "ws";
-import url from "url";
+const http = require("http");
+const net = require("net");
+const WebSocket = require("ws");
+const url = require("url");
 
 const MANAGER_TOKEN = process.env.MANAGER_TOKEN || "changeme";
 
 let managerSocket = null;
 
-// HTTP server (used for both WS and proxy)
+// Map of active user <-> target connections
+const connections = new Map();
+let nextId = 1;
+
+// HTTP server (used for both WS upgrade and CONNECT proxy)
 const server = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("Proxy relay server is running.\n");
 });
 
-// WebSocket endpoint for manager
-const wss = new WebSocketServer({ noServer: true });
+// WebSocket server for manager connections
+const wss = new WebSocket.Server({ noServer: true });
 
 wss.on("connection", (ws) => {
   console.log("[WS] Manager connected");
@@ -32,9 +34,9 @@ wss.on("connection", (ws) => {
     managerSocket = null;
   });
 
-  ws.on("message", async (msg) => {
+  ws.on("message", (msg) => {
     if (!Buffer.isBuffer(msg)) return;
-    // Expected message format: JSON or raw binary frame
+
     try {
       const packet = JSON.parse(msg.toString());
       const { id, type, data } = packet;
@@ -46,16 +48,16 @@ wss.on("connection", (ws) => {
       } else if (type === "end") {
         conn.end();
       }
-    } catch {
-      // ignore
+    } catch (e) {
+      console.warn("[WS] Bad message:", e.message);
     }
   });
 });
 
-// Handle upgrade for WS
+// Handle upgrade to WebSocket
 server.on("upgrade", (req, socket, head) => {
-  const { pathname, query } = url.parse(req.url, true);
-  if (pathname === "/ws" && query.token === MANAGER_TOKEN) {
+  const parsed = url.parse(req.url, true);
+  if (parsed.pathname === "/ws" && parsed.query.token === MANAGER_TOKEN) {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
     });
@@ -64,13 +66,10 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-// Map of active user <-> target connections
-const connections = new Map();
-let nextId = 1;
-
 // Handle HTTP CONNECT (for HTTPS proxy)
 server.on("connect", (req, clientSocket, head) => {
-  const [host, port] = req.url.split(":");
+  const [host, portStr] = req.url.split(":");
+  const port = parseInt(portStr || "443", 10);
   const id = (nextId++).toString();
 
   if (!managerSocket || managerSocket.readyState !== WebSocket.OPEN) {
@@ -81,6 +80,7 @@ server.on("connect", (req, clientSocket, head) => {
   console.log(`[CONNECT] ${host}:${port} id=${id}`);
 
   connections.set(id, clientSocket);
+
   clientSocket.on("data", (chunk) => {
     managerSocket.send(
       JSON.stringify({
@@ -103,9 +103,11 @@ server.on("connect", (req, clientSocket, head) => {
   clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
 });
 
+// Start server
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
   console.log(`✅ Proxy relay server running on port ${PORT}`);
-  console.log(`Manager WS URL: wss://<your-render-app>.onrender.com/ws?token=${MANAGER_TOKEN}`);
+  console.log(
+    `Manager WS URL: wss://<your-render-app>.onrender.com/ws?token=${MANAGER_TOKEN}`
+  );
 });
-
