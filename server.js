@@ -1,28 +1,28 @@
 // server.js
 //
-// Render-hosted proxy relay
-// user <-> this server <-> manager (WebSocket) <-> target
+// Proxy relay server (user <-> server <-> manager <-> target)
+
+// ==== CONFIGURATION ====
+const MANAGER_TOKEN = "shh"; // <-- change this value here
+
+// ======================
 
 const http = require("http");
 const net = require("net");
 const WebSocket = require("ws");
 const url = require("url");
 
-const MANAGER_TOKEN = process.env.MANAGER_TOKEN || "changeme";
-
 let managerSocket = null;
-
-// Map of active user <-> target connections
 const connections = new Map();
 let nextId = 1;
 
-// HTTP server (used for both WS upgrade and CONNECT proxy)
+// HTTP server
 const server = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("Proxy relay server is running.\n");
 });
 
-// WebSocket server for manager connections
+// WebSocket server for manager
 const wss = new WebSocket.Server({ noServer: true });
 
 wss.on("connection", (ws) => {
@@ -36,7 +36,6 @@ wss.on("connection", (ws) => {
 
   ws.on("message", (msg) => {
     if (!Buffer.isBuffer(msg)) return;
-
     try {
       const packet = JSON.parse(msg.toString());
       const { id, type, data } = packet;
@@ -66,7 +65,7 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-// Handle HTTP CONNECT (for HTTPS proxy)
+// Handle HTTP CONNECT
 server.on("connect", (req, clientSocket, head) => {
   const [host, portStr] = req.url.split(":");
   const port = parseInt(portStr || "443", 10);
