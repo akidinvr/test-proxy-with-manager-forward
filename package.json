@@ -1,0 +1,17 @@
+{
+  "name": "render-proxy-manager",
+  "version": "1.0.0",
+  "description": "HTTP proxy + manager-in-the-loop example for Render",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:manager": "node manager.js"
+  },
+  "engines": {
+    "node": "18.x"
+  },
+  "dependencies": {
+    "ws": "^8.13.0",
+    "uuid": "^9.0.0"
+  }
+}
